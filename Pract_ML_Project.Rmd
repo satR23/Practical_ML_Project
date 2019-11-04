@@ -1,0 +1,152 @@
+---
+title: "PracticalMLProject"
+author: "Sathya Thiruvengadam"
+date: "November 2, 2019"
+output: 
+    html_document:
+        keep_md: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Executive Summary:
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity, one thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of participants to quantify the quality of the activity. 
+
+### Download and read the data
+```{r readdata }
+if (!file.exists("./Project")){
+    dir.create("./Project")
+}
+
+#Download file to local directory
+fileurltrain="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+download.file(fileurltrain, destfile="./Project/training.csv")
+datedownloaded <- date()
+fileurltest="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(fileurltest, destfile="./Project/testing.csv")
+datedownloaded <- date()
+
+##read files training and test dataset
+rTrain <- read.csv("./Project/training.csv", header = TRUE)
+rTest <- read.csv("./Project/testing.csv", header=TRUE)
+```
+
+### Load libraries
+```{r loadlib, include=FALSE}
+library(caret)
+library(dplyr)
+library(ggplot2)
+library(rattle)
+library(randomForest)
+```
+
+### Explanatory Analysis and data cleansing
+```{r expanal, results="hide"}
+##Data Cleansing
+str(rTrain)
+
+## Check for NA's and remove the colmns with NA's
+anyNA(rTrain)
+sum(complete.cases(rTrain))
+naVarTrain <- which(colSums(is.na(rTrain)) > 0)
+naVarTest <- which(colSums(is.na(rTest)) > 0)
+naVar <- unique(naVarTrain, naVarTest)
+fTrain <- rTrain[,-(naVar)]
+fTest <- rTest[,-(naVar)]
+
+## Check for empty column and remove
+emptyVarTrain <- which(colSums(fTrain == "") > 0)
+emptyVarTest <- which(colSums(fTest == "") > 0)
+emptyVar <- unique(emptyVarTrain, emptyVarTest)
+fTrain <- fTrain[ ,-(emptyVar)]
+fTest <- fTest[ ,-(emptyVar)]
+
+## Exclude the first 7 coulmns from the dataset
+fTrain <- select(fTrain, -(1:7))
+Trclasse <-fTrain$classe
+TrainClean <- fTrain[ , sapply(fTrain,is.numeric)]
+TrainClean$classe <-as.factor(Trclasse)
+fTest <- select(fTest, -(1:7))
+TestClean <- fTest[ ,sapply(fTest, is.numeric)]
+```
+
+### Data Slicing
+Use the "fTest" as cross validation dataset, splitting the fTrain to train and test dataset using createDatePartition from "caret" package,set seed for reproducability.
+
+```{r datapart, results="hide"}
+set.seed(3945)
+inTrain <- createDataPartition(TrainClean$classe, p=0.70, list=FALSE)
+Train <- TrainClean[inTrain,]
+Test <- TrainClean[-inTrain,]
+dim(Train); dim(Test)
+```
+
+###Build Model
+
+Starting to build the model with classification tree algorthim using "rpart" method from caret package, and another model with random forest under randomForest package.
+
+
+### Classification Tree
+```{r clasifiTree}
+#Build the model using the method "rpart" from caret package
+fit_ct <- train(classe ~ . , method="rpart", data=Train)
+
+#Predict the model with test
+preCT <- predict(fit_ct, Test)
+cm <- confusionMatrix(preCT, Test$classe)
+
+#Calculate the accuracy and out of sample error-
+(Acc_ct <- cm$overall['Accuracy'])
+(OOSE <- 1-Acc_ct)
+
+```
+
+The accuracy is 49% and the OOSE is 51%, which is too high of error rate.
+
+### Random Forest
+```{r randfor}
+#Building the random forest with the random forest package
+fit_rf <- randomForest(classe ~ ., data=Train)
+
+#Predict the model with test
+preRF <- predict(fit_rf, Test)
+cm <- confusionMatrix(preRF, Test$classe)
+
+#Calculate the accuracy and out of sample error-
+(Acc_rf <- cm$overall[1])
+(OOSE <- 1-Acc_rf)
+```
+
+The accuracy is 99% and the OOSE is very low 0.003, is it possible for overfitting when the OOSE is low as the model is tightly tunned for the train data, calculating overfitting - difference between the train R-square and test R-square, where R-square is cor(predicted-actual)^2 and can use root mean square error difference.
+
+## Calculating Overfitting
+```{r calculate overfit}
+train_Yhat <- as.numeric(fit_rf$predicted)
+train_Y <- as.numeric(Train$classe)
+test_Yhat <- as.numeric(preRF)
+test_Y <- as.numeric(Test$classe)
+
+#Calculating  overfitting
+Train_Rsq <- cor(train_Yhat, train_Y)^2
+Test_Rsq <- cor(test_Yhat, test_Y)^2
+(Overfitting <- Train_Rsq - Test_Rsq)
+
+(Error <- (RMSE(train_Yhat,train_Y)-RMSE(test_Yhat, test_Y)))
+
+#which is both close to zero indicates there is no overfitting in model, which is
+#proved with the plot, as the number of tree increases the error remains in or #close to zero
+
+plot(fit_rf)
+
+```
+
+From the model and analysis, Random Forest is the most accurate model that can 
+be used in other new data sets with minimal OOSE.
+
+Running the best model(random forest) in validation dataset.
+```{r validaterun}
+predTest <- predict(fit_rf, TestClean)
+```
